@@ -30,14 +30,20 @@ Allows AI assistants (like Claude, Antigravity, Cursor, etc.) to securely query 
 * **`pesu_download_announcement_attachment`**: Downloads attached files (e.g., timetable PDFs, circulars) to your computer.
 * **`pesu_read_announcement_attachment`**: Reads and parses text directly from PDF attachments into the AI's context.
 
-### 4. Examinations & Hall Ticket
+### 4. Examinations, PYQs & Hall Ticket
+* **`pesu_search_pyqs`**: Searches the PES University Library database for Previous Year Question Papers (PYQs) by course name, code, or exam year.
+* **`pesu_download_pyq`**: Downloads ESA Previous Year Question Paper PDFs directly to disk.
+* **`pesu_get_seating_info`**: Retrieves structured examination desk arrangements (course, date, time, desk/terminal room, and block) for upcoming tests.
 * **`pesu_check_hall_ticket`**: Checks if the upcoming End Semester Assessment (ESA) hall ticket is released.
 * **`pesu_download_hall_ticket`**: Downloads the official ESA hall ticket PDF to disk for printing.
-* **`pesu_get_seating_info`**: Retrieves exam room and seat number for upcoming tests.
 * **`pesu_get_quizzes`**: Lists upcoming quiz schedules and past scores.
 * **`pesu_get_assignments`**: Checks homework deadlines, submission status, and evaluation marks.
 
-### 5. Administrative & Campus Utility
+### 5. Faculty & Staff Directory (staff.pes.edu)
+* **`pesu_search_faculty`**: Searches professors and faculty members by name or department.
+* **`pesu_get_faculty_details`**: Retrieves faculty email, phone extension, department, campus, and profile info.
+
+### 6. Administrative & Campus Utility
 * **`pesu_get_calendar`**: Lists university calendar events, exam dates, and holidays.
 * **`pesu_get_grievances`**: Lists student grievance redressal tickets.
 * **`pesu_check_backlog_status`**: Checks whether backlog registration is open.

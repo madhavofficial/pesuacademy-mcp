@@ -99,6 +99,117 @@ export class MockPesuServer {
         return;
       }
 
+      // Faculty Search (staff.pes.edu)
+      if (pathname === '/atoz/list/' || pathname === '/atoz/list') {
+        const query = urlObj.searchParams.get('search') || '';
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        if (query.toLowerCase().includes('notfound')) {
+          res.end('<html><body><div class="chat-contacts"></div></body></html>');
+        } else {
+          res.end(`
+            <html>
+              <body>
+                <div class="chat-contacts">
+                  <a class="chat-contacts-item" href="/nm1332/">
+                    <div class="dashboard-message-avatar"><img src="/static/images/def.png" /></div>
+                    <div class="chat-contacts-item-text">
+                      <h4>Geetha Shankar</h4>
+                      <p>Associate Professor</p>
+                    </div>
+                  </a>
+                </div>
+              </body>
+            </html>
+          `);
+        }
+        return;
+      }
+
+      // Faculty Details (staff.pes.edu)
+      if (pathname.startsWith('/nm1332')) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`
+          <html>
+            <body>
+              <div class="agent_card-title"><h4>Geetha Shankar</h4></div>
+              <div class="geodir-category-location"><h5>Associate Professor</h5></div>
+              <a href="mailto:geethashankar@pes.edu">geethashankar@pes.edu</a>
+              <a href="tel:8026721983">8026721983</a>
+              <li class="contat-card"><span>Department</span><p>Science & Humanities</p></li>
+              <li class="contat-card"><span>Campus</span><p>RR Campus</p></li>
+            </body>
+          </html>
+        `);
+        return;
+      }
+
+      // Library Login (MyPage.aspx)
+      if (pathname === '/MyPage.aspx') {
+        if (req.method === 'POST') {
+          res.writeHead(200, {
+            'Content-Type': 'text/html',
+            'Set-Cookie': '.ASPXFORMSAUTH=mock_aspx_auth_cookie; Path=/',
+          });
+          res.end('<html><body>Logged in</body></html>');
+          return;
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <html>
+              <body>
+                <input type="hidden" id="__VIEWSTATE" name="__VIEWSTATE" value="mock_vs_123" />
+                <input type="hidden" id="__VIEWSTATEGENERATOR" name="__VIEWSTATEGENERATOR" value="mock_vsg_123" />
+                <input type="hidden" id="__EVENTVALIDATION" name="__EVENTVALIDATION" value="mock_ev_123" />
+              </body>
+            </html>
+          `);
+          return;
+        }
+      }
+
+      // Library Search (Search.aspx)
+      if (pathname === '/Search.aspx') {
+        if (req.method === 'POST') {
+          res.writeHead(200, { 'Content-Type': 'text/plain' });
+          res.end(`
+            Total Search Results: <span>1</span>
+            <table id="GridView1">
+              <tr>
+                <td>
+                  <span style="font-weight:bold">Operating Systems [e resource : question paper] (UE21CS242B)</span>
+                  <a onclick="fnDownload('digital/qp/test_qp.pdf')">Download</a>
+                  <span>Year,Ed:</span><span>2023</span>
+                  <span>ID:</span><span>REC12345</span>
+                  <span>Call_No:</span><span>CS-2023-01</span>
+                  <span>Status: Available</span>
+                </td>
+              </tr>
+            </table>
+          `);
+          return;
+        } else {
+          res.writeHead(200, { 'Content-Type': 'text/html' });
+          res.end(`
+            <html>
+              <body>
+                <span id="Label1">Aavish Gilbert J</span>
+                <input type="hidden" id="__VIEWSTATE" name="__VIEWSTATE" value="mock_search_vs_456" />
+                <input type="hidden" id="__VIEWSTATEGENERATOR" name="__VIEWSTATEGENERATOR" value="mock_search_vsg_456" />
+                <input type="hidden" id="__EVENTVALIDATION" name="__EVENTVALIDATION" value="mock_search_ev_456" />
+              </body>
+            </html>
+          `);
+          return;
+        }
+      }
+
+      // Library PDF Download
+      if (pathname.startsWith('/digital/qp/')) {
+        res.writeHead(200, { 'Content-Type': 'application/pdf' });
+        res.end(createValidMinimalPdf());
+        return;
+      }
+
       // 1. Initial Login page
       if (pathname === '/Academy/' || pathname === '/Academy') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -469,7 +580,20 @@ export class MockPesuServer {
         // Seating Info (mode 6404, action 5)
         if (controllerMode === '6404' && actionType === '5') {
           res.writeHead(200, { 'Content-Type': 'text/html' });
-          res.end('<div>Room: G04, Desk: 42, Block: Golden Jubilee</div>');
+          res.end(`
+            <table id="seatinginfo">
+              <tbody>
+                <tr>
+                  <td>Computer Networks</td>
+                  <td>UE23CS252B</td>
+                  <td>2026-11-04</td>
+                  <td>09:30 AM</td>
+                  <td>Room: G04, Desk: 42</td>
+                  <td>Golden Jubilee</td>
+                </tr>
+              </tbody>
+            </table>
+          `);
           return;
         }
 

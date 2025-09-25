@@ -324,6 +324,74 @@ export function createServer(customClient?: PesuClient): Server {
           properties: {},
         },
       },
+      {
+        name: 'pesu_search_faculty',
+        description: 'Search PES University faculty and professors directory (staff.pes.edu) by name or department.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Faculty or professor name (e.g. "Shankar", "Computer Science").',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'pesu_get_faculty_details',
+        description: 'Get detailed contact, department, designation, and campus details for a specific faculty member.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            faculty_id: {
+              type: 'string',
+              description: 'Faculty identifier or URL slug (e.g. "nm1332" from search results).',
+            },
+          },
+          required: ['faculty_id'],
+        },
+      },
+      {
+        name: 'pesu_search_pyqs',
+        description: 'Search PES Library Previous Year Question Papers (PYQs) by course name, code, or year from the library database.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Course title or code (e.g. "Operating Systems", "UE21CS242B").',
+            },
+            year: {
+              type: 'string',
+              description: 'Optional examination year filter (e.g. "2023", "2024").',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
+        name: 'pesu_download_pyq',
+        description: 'Download a Previous Year Question Paper (PYQ) PDF from the PES Library portal to disk.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            download_path: {
+              type: 'string',
+              description: 'Download path from search results (e.g. "digital/qp/hF2ysQDL11530.pdf").',
+            },
+            output_dir: {
+              type: 'string',
+              description: 'Directory to save the PDF (default: "./downloads").',
+            },
+            custom_filename: {
+              type: 'string',
+              description: 'Optional custom filename for the saved PDF.',
+            },
+          },
+          required: ['download_path'],
+        },
+      },
     ],
   };
 });
@@ -467,7 +535,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'pesu_get_seating_info': {
         const res = await client.getSeatingInfo();
         return {
-          content: [{ type: 'text', text: res }],
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
         };
       }
 
@@ -524,6 +592,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const res = await client.checkBacklogStatus();
         return {
           content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'pesu_search_faculty': {
+        const query = (args?.query as string) || '';
+        const res = await client.searchFaculty(query);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'pesu_get_faculty_details': {
+        const facultyId = (args?.faculty_id as string) || '';
+        const res = await client.getFacultyDetails(facultyId);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'pesu_search_pyqs': {
+        const query = (args?.query as string) || '';
+        const year = args?.year as string | undefined;
+        const res = await client.searchLibraryPyqs(query, year);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
+        };
+      }
+
+      case 'pesu_download_pyq': {
+        const downloadPath = (args?.download_path as string) || '';
+        const outDir = (args?.output_dir as string) || './downloads';
+        const customFilename = args?.custom_filename as string | undefined;
+        const res = await client.downloadLibraryPyq(downloadPath, outDir, customFilename);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `PYQ downloaded successfully!\nFilename: ${res.filename}\nLocation: ${res.path}\nSize: ${(res.size / 1024).toFixed(1)} KB`,
+            },
+          ],
         };
       }
 

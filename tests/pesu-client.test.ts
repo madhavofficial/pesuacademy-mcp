@@ -488,14 +488,17 @@ describe('PesuClient Operations and Edge Cases', () => {
       assert.strictEqual(assignments[0].marksObtained, '10');
     });
 
-    test('getSeatingInfo extracts room and desk info', async () => {
+    test('getSeatingInfo extracts structured seating arrangement and room/desk info', async () => {
       const client = new PesuClient({
         sessionId: 'valid_mock_session_12345',
         baseUrl: mockServer.baseUrl,
       });
       const info = await client.getSeatingInfo();
-      assert.ok(info.includes('Room: G04'));
-      assert.ok(info.includes('Desk: 42'));
+      assert.strictEqual(info.isAvailable, true);
+      assert.strictEqual(info.items.length, 1);
+      assert.strictEqual(info.items[0].courseCode, 'UE23CS252B');
+      assert.ok(info.items[0].terminal.includes('Room: G04'));
+      assert.ok(info.items[0].terminal.includes('Desk: 42'));
     });
 
     test('getProfile extracts structured fields and fallback regex matches', async () => {
@@ -589,6 +592,93 @@ describe('PesuClient Operations and Edge Cases', () => {
       mockServer.backlogAvailable = false;
       const resClosed = await client.checkBacklogStatus();
       assert.strictEqual(resClosed.isAvailable, false);
+    });
+  });
+
+  describe('Faculty Directory (staff.pes.edu)', () => {
+    test('searchFaculty returns matching faculty members', async () => {
+      const client = new PesuClient({
+        staffBaseUrl: mockServer.baseUrl,
+      });
+      const results = await client.searchFaculty('Shankar');
+      assert.strictEqual(results.length, 1);
+      assert.strictEqual(results[0].name, 'Geetha Shankar');
+      assert.strictEqual(results[0].designation, 'Associate Professor');
+      assert.strictEqual(results[0].id, 'nm1332');
+    });
+
+    test('searchFaculty returns empty array when no matches found', async () => {
+      const client = new PesuClient({
+        staffBaseUrl: mockServer.baseUrl,
+      });
+      const results = await client.searchFaculty('notfound');
+      assert.strictEqual(results.length, 0);
+    });
+
+    test('searchFaculty throws when query is empty', async () => {
+      const client = new PesuClient({
+        staffBaseUrl: mockServer.baseUrl,
+      });
+      await assert.rejects(async () => await client.searchFaculty(''), /Faculty search query is required/);
+    });
+
+    test('getFacultyDetails returns structured profile details', async () => {
+      const client = new PesuClient({
+        staffBaseUrl: mockServer.baseUrl,
+      });
+      const details = await client.getFacultyDetails('nm1332');
+      assert.strictEqual(details.name, 'Geetha Shankar');
+      assert.strictEqual(details.designation, 'Associate Professor');
+      assert.strictEqual(details.email, 'geethashankar@pes.edu');
+      assert.strictEqual(details.phone, '8026721983');
+      assert.strictEqual(details.department, 'Science & Humanities');
+      assert.strictEqual(details.campus, 'RR Campus');
+    });
+
+    test('getFacultyDetails throws when facultyId is empty', async () => {
+      const client = new PesuClient({
+        staffBaseUrl: mockServer.baseUrl,
+      });
+      await assert.rejects(async () => await client.getFacultyDetails(''), /Faculty ID is required/);
+    });
+  });
+
+  describe('PES Library PYQ Downloader', () => {
+    test('searchLibraryPyqs searches and returns PYQ records', async () => {
+      const client = new PesuClient({
+        libraryBaseUrl: mockServer.baseUrl,
+      });
+      const res = await client.searchLibraryPyqs('Operating Systems');
+      assert.strictEqual(res.totalResults, 1);
+      assert.strictEqual(res.results.length, 1);
+      assert.strictEqual(res.results[0].courseCode, 'UE21CS242B');
+      assert.strictEqual(res.results[0].yearEdition, '2023');
+      assert.strictEqual(res.results[0].downloadPath, 'digital/qp/test_qp.pdf');
+      assert.strictEqual(res.results[0].isDownloadable, true);
+    });
+
+    test('searchLibraryPyqs throws when query is empty', async () => {
+      const client = new PesuClient({
+        libraryBaseUrl: mockServer.baseUrl,
+      });
+      await assert.rejects(async () => await client.searchLibraryPyqs(''), /Search query is required/);
+    });
+
+    test('downloadLibraryPyq downloads and saves PDF file', async () => {
+      const client = new PesuClient({
+        libraryBaseUrl: mockServer.baseUrl,
+      });
+      const res = await client.downloadLibraryPyq('digital/qp/test_qp.pdf', tempDownloadDir, 'OS_PYQ_2023.pdf');
+      assert.strictEqual(res.filename, 'OS_PYQ_2023.pdf');
+      assert.ok(fs.existsSync(res.path));
+      assert.ok(res.size > 0);
+    });
+
+    test('downloadLibraryPyq throws when downloadPath is empty', async () => {
+      const client = new PesuClient({
+        libraryBaseUrl: mockServer.baseUrl,
+      });
+      await assert.rejects(async () => await client.downloadLibraryPyq(''), /Download path or document ID is required/);
     });
   });
 });

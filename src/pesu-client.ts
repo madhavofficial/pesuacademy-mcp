@@ -11,6 +11,57 @@ export interface PesuCredentials {
   password?: string;
   sessionId?: string;
   baseUrl?: string;
+  libraryBaseUrl?: string;
+  staffBaseUrl?: string;
+  libraryMemberId?: string;
+  libraryPassword?: string;
+}
+
+export interface SeatingInfoItem {
+  courseName: string;
+  courseCode: string;
+  date: string;
+  time: string;
+  terminal: string;
+  block: string;
+}
+
+export interface SeatingInfoResult {
+  isAvailable: boolean;
+  message: string;
+  items: SeatingInfoItem[];
+  rawText?: string;
+}
+
+export interface FacultyMember {
+  id: string;
+  name: string;
+  designation: string;
+  department?: string;
+  avatarUrl?: string;
+  profileUrl: string;
+}
+
+export interface FacultyDetails extends FacultyMember {
+  email?: string;
+  phone?: string;
+  campus?: string;
+  qualifications?: string;
+  specialization?: string;
+  biography?: string;
+}
+
+export interface LibraryPyq {
+  id: string;
+  title: string;
+  courseCode?: string;
+  yearEdition?: string;
+  recordId?: string;
+  callNo?: string;
+  status?: string;
+  downloadPath?: string;
+  downloadUrl?: string;
+  isDownloadable: boolean;
 }
 
 export function resolveOutputDir(dir?: string): string {
@@ -45,9 +96,15 @@ export class PesuClient {
   private baseUrl = 'https://www.pesuacademy.com';
   private csrfToken: string = '';
   private credentials: PesuCredentials;
+  private libraryJar?: CookieJar;
+  private libraryClient?: AxiosInstance;
+  private libraryBaseUrl: string;
+  private staffBaseUrl: string;
 
   constructor(creds: PesuCredentials = {}) {
     this.baseUrl = creds.baseUrl || process.env.PESU_BASE_URL || 'https://www.pesuacademy.com';
+    this.libraryBaseUrl = creds.libraryBaseUrl || process.env.PESU_LIBRARY_BASE_URL || 'http://14.143.33.149';
+    this.staffBaseUrl = creds.staffBaseUrl || process.env.PESU_STAFF_BASE_URL || 'https://staff.pes.edu';
     this.credentials = {
       ...creds,
       sessionId: creds.sessionId || process.env.PESU_SESSION_ID,
@@ -959,14 +1016,53 @@ export class PesuClient {
   }
 
   // --- 7. Seating Info ---
-  public async getSeatingInfo(): Promise<string> {
+  public async getSeatingInfo(): Promise<SeatingInfoResult> {
     const html = await this.doAjax('studentProfilePESUAdmin', 'GET', {
       controllerMode: 6404,
       actionType: 5,
       menuId: 655,
     });
     const $ = cheerio.load(html);
-    return $.text().replace(/\s+/g, ' ').trim();
+    const rawText = $.text().replace(/\s+/g, ' ').trim();
+    const items: SeatingInfoItem[] = [];
+
+    const table = $('#seatinginfo');
+    if (table.length > 0) {
+      table.find('tbody tr').each((_, tr) => {
+        const cols = $(tr)
+          .find('td')
+          .map((_, td) => $(td).text().trim())
+          .get();
+        if (cols.length >= 6) {
+          items.push({
+            courseName: cols[0],
+            courseCode: cols[1],
+            date: cols[2],
+            time: cols[3],
+            terminal: cols[4],
+            block: cols[5],
+          });
+        }
+      });
+    }
+
+    const isAvailable =
+      items.length > 0 ||
+      (!rawText.includes('No Test Seating Info is available') &&
+        (rawText.includes('Room:') || rawText.includes('Desk:') || rawText.includes('Block:')));
+
+    const message = isAvailable
+      ? items.length > 0
+        ? `Found ${items.length} seating arrangement(s).`
+        : 'Seating information available.'
+      : 'No test seating information is currently available.';
+
+    return {
+      isAvailable,
+      message,
+      items,
+      rawText: rawText || undefined,
+    };
   }
 
   // --- 8. My Profile ---
@@ -1211,6 +1307,308 @@ export class PesuClient {
       message: isAvailable
         ? 'Backlog ESA Registration is currently OPEN.'
         : 'Backlog Registration is currently NOT available.',
+    };
+  }
+
+  // --- 22. Faculty & Staff Directory (staff.pes.edu) ---
+  public async searchFaculty(query: string): Promise<FacultyMember[]> {
+    if (!query) throw new Error('Faculty search query is required.');
+    const url = `${this.staffBaseUrl}/atoz/list/?search=${encodeURIComponent(query)}`;
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      timeout: 15000,
+    });
+
+    const $ = cheerio.load(res.data);
+    const members: FacultyMember[] = [];
+
+    $('a.chat-contacts-item').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      const name = $(el).find('h4').text().trim();
+      const desig = $(el).find('.chat-contacts-item-text p').first().text().trim();
+      const avatar = $(el).find('.dashboard-message-avatar img').attr('src');
+      const id = href.replace(/^\/+|\/+$/g, '');
+
+      if (id && name) {
+        members.push({
+          id,
+          name,
+          designation: desig,
+          avatarUrl: avatar
+            ? avatar.startsWith('http')
+              ? avatar
+              : `${this.staffBaseUrl}${avatar}`
+            : undefined,
+          profileUrl: `${this.staffBaseUrl}/${id}/`,
+        });
+      }
+    });
+
+    return members;
+  }
+
+  public async getFacultyDetails(facultyId: string): Promise<FacultyDetails> {
+    if (!facultyId) throw new Error('Faculty ID is required.');
+    const cleanId = facultyId.replace(/^\/+|\/+$/g, '');
+    const url = `${this.staffBaseUrl}/${cleanId}/`;
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      },
+      timeout: 15000,
+    });
+
+    const $ = cheerio.load(res.data);
+    const name = $('.agent_card-title h4, h4').first().text().trim() || cleanId;
+    const designation = $('.geodir-category-location h5')
+      .first()
+      .text()
+      .replace(/\s+/g, ' ')
+      .replace(/.*fa-id-badge/i, '')
+      .trim();
+    const email = $("a[href^='mailto:']").first().text().trim() || undefined;
+    const phone = $("a[href^='tel:']").first().text().trim() || undefined;
+
+    let department: string | undefined;
+    let campus: string | undefined;
+
+    $('li.contat-card').each((_, el) => {
+      const text = $(el).text().replace(/\s+/g, ' ').trim();
+      if (text.includes('Department')) {
+        department = $(el).find('p').text().trim() || text.replace(/.*Department\s*/i, '').trim();
+      }
+      if (text.includes('Campus')) {
+        campus = $(el).find('p').text().trim() || text.replace(/.*Campus\s*/i, '').trim();
+      }
+    });
+
+    return {
+      id: cleanId,
+      name,
+      designation,
+      email,
+      phone,
+      department,
+      campus,
+      profileUrl: url,
+    };
+  }
+
+  // --- 23. PES Library Previous Year Question Papers (PYQs) ---
+  public async ensureLibrarySession(): Promise<AxiosInstance> {
+    if (!this.libraryClient || !this.libraryJar) {
+      this.libraryJar = new CookieJar();
+      this.libraryClient = wrapper(
+        axios.create({
+          baseURL: this.libraryBaseUrl,
+          jar: this.libraryJar,
+          withCredentials: true,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          },
+          timeout: 20000,
+        })
+      );
+    }
+
+    const cookies = await this.libraryJar.getCookies(this.libraryBaseUrl);
+    const hasAuth = cookies.some((c) => c.key === '.ASPXFORMSAUTH');
+    if (hasAuth) {
+      return this.libraryClient;
+    }
+
+    const memberId =
+      this.credentials.libraryMemberId ||
+      process.env.PESU_LIBRARY_MEMBER_ID ||
+      'PES1202100706';
+    const password =
+      this.credentials.libraryPassword ||
+      process.env.PESU_LIBRARY_PASSWORD ||
+      'PESB3Sa5n';
+
+    const loginPage = await this.libraryClient.get('/MyPage.aspx');
+    const $ = cheerio.load(loginPage.data);
+    const vs = $('#__VIEWSTATE').val() || '';
+    const vsg = $('#__VIEWSTATEGENERATOR').val() || '';
+    const ev = $('#__EVENTVALIDATION').val() || '';
+
+    const params = new URLSearchParams({
+      __VIEWSTATE: vs as string,
+      __EVENTVALIDATION: ev as string,
+      txtMemberid: memberId,
+      txtPassword: password,
+      signin: 'Sign In',
+    });
+    if (vsg) {
+      params.append('__VIEWSTATEGENERATOR', vsg as string);
+    }
+
+    await this.libraryClient.post('/MyPage.aspx', params.toString(), {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+
+    return this.libraryClient;
+  }
+
+  public async searchLibraryPyqs(
+    query: string,
+    year?: string
+  ): Promise<{ totalResults: number; results: LibraryPyq[] }> {
+    if (!query) throw new Error('Search query is required.');
+    const client = await this.ensureLibrarySession();
+
+    const searchPage = await client.get('/Search.aspx');
+    const $s = cheerio.load(searchPage.data);
+    const sVs = $s('#__VIEWSTATE').val() || '';
+    const sVsg = $s('#__VIEWSTATEGENERATOR').val() || '';
+    const sEv = $s('#__EVENTVALIDATION').val() || '';
+
+    const searchPayload = new URLSearchParams({
+      ToolkitScriptManager1: 'UpdatePanel1|cmdSearch',
+      __EVENTTARGET: '',
+      __EVENTARGUMENT: '',
+      __VIEWSTATE: sVs as string,
+      __VIEWSTATEGENERATOR: (sVsg as string) || '',
+      __VIEWSTATEENCRYPTED: '',
+      __EVENTVALIDATION: sEv as string,
+      txtMemberid: '',
+      txtPassword: '',
+      txtTitle: query,
+      txtAuthor: '',
+      txtYear: year || '',
+      txtSubject: '',
+      txtCallno: '',
+      txtPublisher: '',
+      cmbCategory: '',
+      txtLocation: '',
+      txtEdition: '',
+      txtAccessNo: '',
+      __ASYNCPOST: 'true',
+      cmdSearch: 'Search',
+    });
+
+    const searchRes = await client.post('/Search.aspx', searchPayload.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-MicrosoftAjax': 'Delta=true',
+      },
+    });
+
+    const delta = typeof searchRes.data === 'string' ? searchRes.data : '';
+    const $r = cheerio.load(delta || searchPage.data);
+    const results: LibraryPyq[] = [];
+
+    $r('#GridView1 tr').each((index, tr) => {
+      const boldSpan = $r(tr)
+        .find('span')
+        .filter((_, el) => ($r(el).attr('style') || '').toLowerCase().includes('bold'))
+        .first();
+      const title = boldSpan.text().trim();
+      if (!title) return;
+
+      const onclick = $r(tr).find("a[onclick*='fnDownload']").first().attr('onclick') || '';
+      const m = onclick.match(/fnDownload\(['"]([^'"]+)['"]\)/);
+      const downloadPath = m ? m[1] : undefined;
+
+      const yearLabel = $r(tr)
+        .find('span')
+        .filter((_, el) => $r(el).text().trim().startsWith('Year,Ed:'))
+        .first();
+      const yearEdition = yearLabel.next('span').text().trim() || undefined;
+
+      const idLabel = $r(tr)
+        .find('span')
+        .filter((_, el) => $r(el).text().trim().startsWith('ID:'))
+        .first();
+      const recordId = idLabel.next('span').text().trim() || undefined;
+
+      const callNoLabel = $r(tr)
+        .find('span')
+        .filter((_, el) => $r(el).text().trim().startsWith('Call_No:'))
+        .first();
+      const callNo = callNoLabel.next('span').text().trim() || undefined;
+
+      const statusContainerText = $r(tr)
+        .find('span')
+        .filter((_, el) => $r(el).text().trim().startsWith('Status:'))
+        .first()
+        .parent()
+        .text()
+        .trim();
+      const statusMatch = statusContainerText.match(/Status:\s*([A-Za-z]+)/i);
+      const status = statusMatch ? statusMatch[1] : undefined;
+
+      const courseCodeMatch = title.match(/\(([A-Z0-9]+)\)\s*$/i);
+      const courseCode = courseCodeMatch ? courseCodeMatch[1] : undefined;
+
+      const downloadUrl = downloadPath
+        ? `${this.libraryBaseUrl}/${downloadPath.replace(/^\/+/, '')}`
+        : undefined;
+
+      results.push({
+        id: downloadPath || recordId || `pyq-${index}`,
+        title,
+        courseCode,
+        yearEdition,
+        recordId,
+        callNo,
+        status,
+        downloadPath,
+        downloadUrl,
+        isDownloadable: Boolean(downloadPath),
+      });
+    });
+
+    const totalMatch = delta.match(/Total Search Results:\s*<span[^>]*>\s*(\d+)\s*<\/span>/i);
+    const totalResults = totalMatch ? parseInt(totalMatch[1], 10) : results.length;
+
+    return {
+      totalResults,
+      results,
+    };
+  }
+
+  public async downloadLibraryPyq(
+    downloadPath: string,
+    outputDir: string = './downloads',
+    customFilename?: string
+  ): Promise<{ filename: string; path: string; size: number }> {
+    if (!downloadPath) throw new Error('Download path or document ID is required.');
+    const client = await this.ensureLibrarySession();
+    const targetDir = resolveOutputDir(outputDir);
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    const relativeUrl = downloadPath.startsWith('http')
+      ? downloadPath.replace(this.libraryBaseUrl, '')
+      : `/${downloadPath.replace(/^\/+/, '')}`;
+
+    const res = await client.get(relativeUrl, {
+      responseType: 'arraybuffer',
+    });
+
+    let filename = customFilename ? sanitizeFilename(customFilename) : '';
+    if (!filename) {
+      const parts = downloadPath.split('/');
+      const lastPart = parts[parts.length - 1];
+      filename = sanitizeFilename(lastPart || 'question_paper.pdf');
+    }
+    if (!filename.toLowerCase().endsWith('.pdf')) {
+      filename += '.pdf';
+    }
+
+    const filePath = path.join(targetDir, filename);
+    fs.writeFileSync(filePath, Buffer.from(res.data));
+
+    return {
+      filename,
+      path: filePath,
+      size: res.data.byteLength || res.data.length,
     };
   }
 }

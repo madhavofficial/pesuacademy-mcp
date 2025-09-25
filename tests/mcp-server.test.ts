@@ -38,6 +38,10 @@ describe('MCP Protocol Server Tool Suite (All 22 Operations & Edge Cases)', () =
     'pesu_download_hall_ticket',
     'pesu_get_grievances',
     'pesu_check_backlog_status',
+    'pesu_search_faculty',
+    'pesu_get_faculty_details',
+    'pesu_search_pyqs',
+    'pesu_download_pyq',
   ];
 
   before(async () => {
@@ -48,6 +52,8 @@ describe('MCP Protocol Server Tool Suite (All 22 Operations & Edge Cases)', () =
     const pesuClient = new PesuClient({
       sessionId: 'valid_mock_session_12345',
       baseUrl: mockServer.baseUrl,
+      staffBaseUrl: mockServer.baseUrl,
+      libraryBaseUrl: mockServer.baseUrl,
     });
 
     const server = createServer(pesuClient);
@@ -67,9 +73,9 @@ describe('MCP Protocol Server Tool Suite (All 22 Operations & Edge Cases)', () =
   });
 
   describe('tools/list operation', () => {
-    test('lists exactly 22 registered tools with schema and descriptions', async () => {
+    test('lists exactly 26 registered tools with schema and descriptions', async () => {
       const list = await client.listTools();
-      assert.strictEqual(list.tools.length, 22);
+      assert.strictEqual(list.tools.length, 26);
 
       const registeredNames = list.tools.map((t) => t.name);
       for (const expected of EXPECTED_TOOL_NAMES) {
@@ -349,6 +355,57 @@ describe('MCP Protocol Server Tool Suite (All 22 Operations & Edge Cases)', () =
       assert.strictEqual(res.isError, undefined);
       const data = JSON.parse(res.content[0].text);
       assert.strictEqual(data.isAvailable, true);
+    });
+
+    // 23. pesu_search_faculty
+    test('Tool 23: pesu_search_faculty searches professor directory', async () => {
+      const res: any = await client.callTool({
+        name: 'pesu_search_faculty',
+        arguments: { query: 'Shankar' },
+      });
+      assert.strictEqual(res.isError, undefined);
+      const data = JSON.parse(res.content[0].text);
+      assert.strictEqual(data.length, 1);
+      assert.strictEqual(data[0].name, 'Geetha Shankar');
+    });
+
+    // 24. pesu_get_faculty_details
+    test('Tool 24: pesu_get_faculty_details fetches profile contacts', async () => {
+      const res: any = await client.callTool({
+        name: 'pesu_get_faculty_details',
+        arguments: { faculty_id: 'nm1332' },
+      });
+      assert.strictEqual(res.isError, undefined);
+      const data = JSON.parse(res.content[0].text);
+      assert.strictEqual(data.name, 'Geetha Shankar');
+      assert.strictEqual(data.email, 'geethashankar@pes.edu');
+    });
+
+    // 25. pesu_search_pyqs
+    test('Tool 25: pesu_search_pyqs queries library question papers', async () => {
+      const res: any = await client.callTool({
+        name: 'pesu_search_pyqs',
+        arguments: { query: 'Operating Systems' },
+      });
+      assert.strictEqual(res.isError, undefined);
+      const data = JSON.parse(res.content[0].text);
+      assert.strictEqual(data.results.length, 1);
+      assert.strictEqual(data.results[0].courseCode, 'UE21CS242B');
+    });
+
+    // 26. pesu_download_pyq
+    test('Tool 26: pesu_download_pyq downloads paper PDF', async () => {
+      const res: any = await client.callTool({
+        name: 'pesu_download_pyq',
+        arguments: {
+          download_path: 'digital/qp/test_qp.pdf',
+          output_dir: tempDownloadDir,
+          custom_filename: 'MCP_Test_PYQ.pdf',
+        },
+      });
+      assert.strictEqual(res.isError, undefined);
+      assert.ok(res.content[0].text.includes('PYQ downloaded successfully'));
+      assert.ok(fs.existsSync(path.join(tempDownloadDir, 'MCP_Test_PYQ.pdf')));
     });
   });
 

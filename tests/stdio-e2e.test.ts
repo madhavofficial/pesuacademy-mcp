@@ -36,9 +36,9 @@ describe('Real Stdio MCP CLI End-to-End Test', () => {
     await mockServer.stop();
   });
 
-  test('stdio CLI: listTools returns all 22 registered tools', async () => {
+  test('stdio CLI: listTools returns all 26 registered tools', async () => {
     const list = await client.listTools();
-    assert.strictEqual(list.tools.length, 22);
+    assert.strictEqual(list.tools.length, 26);
   });
 
   test('stdio CLI: callTool executes pesu_get_profile successfully over stdio', async () => {
