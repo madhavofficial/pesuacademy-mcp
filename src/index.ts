@@ -5,27 +5,33 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { PesuClient } from './pesu-client.js';
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, '../.env'), quiet: true });
+dotenv.config({ quiet: true });
 
-const client = new PesuClient();
+export function createServer(customClient?: PesuClient): Server {
+  const client = customClient || new PesuClient();
 
-const server = new Server(
-  {
-    name: 'pesuacademy-mcp',
-    version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
+  const server = new Server(
+    {
+      name: 'pesuacademy-mcp',
+      version: '1.0.0',
     },
-  }
-);
+    {
+      capabilities: {
+        tools: {},
+      },
+    }
+  );
 
-// Register tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+  // Register tools
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
@@ -303,14 +309,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
-        name: 'pesu_get_portal_credentials',
-        description: 'Retrieve auto-provisioned student logins: Microsoft Teams credentials, Campus WiFi (Captive Portal), and MATLAB.',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-        },
-      },
-      {
         name: 'pesu_get_grievances',
         description: 'List submitted student grievance redressal tickets and status.',
         inputSchema: {
@@ -515,13 +513,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case 'pesu_get_portal_credentials': {
-        const res = await client.getPortalCredentials();
-        return {
-          content: [{ type: 'text', text: JSON.stringify(res, null, 2) }],
-        };
-      }
-
       case 'pesu_get_grievances': {
         const res = await client.getGrievances();
         return {
@@ -547,12 +538,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-async function main() {
+  return server;
+}
+
+export async function runServer() {
+  const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  console.error('Fatal server error:', error);
-  process.exit(1);
-});
+const isDirectExecution =
+  process.argv[1] &&
+  (path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url)) ||
+    process.argv[1].endsWith('index.ts') ||
+    process.argv[1].endsWith('index.js'));
+
+if (isDirectExecution) {
+  runServer().catch((error) => {
+    console.error('Fatal server error:', error);
+    process.exit(1);
+  });
+}

@@ -10,6 +10,7 @@ export interface PesuCredentials {
   username?: string;
   password?: string;
   sessionId?: string;
+  baseUrl?: string;
 }
 
 export function resolveOutputDir(dir?: string): string {
@@ -32,7 +33,10 @@ export function sanitizeFilename(filename: string): string {
     const ext = path.extname(clean);
     clean = clean.slice(0, 175) + ext;
   }
-  return clean || 'document.pdf';
+  if (!clean || clean.replace(/[_.]/g, '').trim() === '') {
+    return 'document.pdf';
+  }
+  return clean;
 }
 
 export class PesuClient {
@@ -43,6 +47,7 @@ export class PesuClient {
   private credentials: PesuCredentials;
 
   constructor(creds: PesuCredentials = {}) {
+    this.baseUrl = creds.baseUrl || process.env.PESU_BASE_URL || 'https://www.pesuacademy.com';
     this.credentials = {
       ...creds,
       sessionId: creds.sessionId || process.env.PESU_SESSION_ID,
@@ -65,17 +70,19 @@ export class PesuClient {
   }
 
   public async authenticate(): Promise<boolean> {
-    // If sessionId cookie provided directly
+    // 1. If sessionId cookie provided directly, test if it is valid
     if (this.credentials.sessionId) {
       await this.jar.setCookie(
-        `JSESSIONID=${this.credentials.sessionId}; Domain=www.pesuacademy.com; Path=/Academy`,
+        `JSESSIONID=${this.credentials.sessionId}; Path=/Academy`,
         this.baseUrl
       );
       const ok = await this.refreshCsrfToken();
       if (ok) return true;
+      // If sessionId expired, clear it and fall back to username/password
+      this.csrfToken = '';
     }
 
-    // Auto-login using username and password
+    // 2. Auto-login using username and password
     const username = this.credentials.username || process.env.PESU_USERNAME;
     const password = this.credentials.password || process.env.PESU_PASSWORD;
 
@@ -85,31 +92,29 @@ export class PesuClient {
       );
     }
 
-    // 1. Fetch login page to get initial cookies and CSRF
+    // Fetch login page to get initial cookies and CSRF
     const loginPageRes = await this.client.get('/Academy/');
     const $ = cheerio.load(loginPageRes.data);
     const initialCsrf =
-      $('meta[name="csrf-token"]').attr('content') ||
       $('input[name="_csrf"]').val() ||
+      $('meta[name="csrf-token"]').attr('content') ||
       '';
 
-    // 2. Perform authentication request
+    // Perform authentication request matching standard browser submission
     const params = new URLSearchParams();
-    params.append('j_username', username);
-    params.append('j_password', password);
     if (initialCsrf) {
       params.append('_csrf', initialCsrf as string);
     }
+    params.append('j_username', username);
+    params.append('j_password', password);
 
     const postHeaders: Record<string, string> = {
       'Content-Type': 'application/x-www-form-urlencoded',
+      Origin: this.baseUrl,
       Referer: `${this.baseUrl}/Academy/`,
     };
-    if (initialCsrf) {
-      postHeaders['X-CSRF-Token'] = initialCsrf as string;
-    }
 
-    const loginRes = await this.client.post(
+    await this.client.post(
       '/Academy/j_spring_security_check',
       params.toString(),
       {
@@ -119,7 +124,7 @@ export class PesuClient {
       }
     );
 
-    // 3. Check if logged in by fetching studentProfilePESU
+    // Check if logged in by fetching studentProfilePESU
     return await this.refreshCsrfToken();
   }
 
@@ -130,14 +135,20 @@ export class PesuClient {
       });
       if (res.status === 200 && typeof res.data === 'string') {
         const $ = cheerio.load(res.data);
+        // If login form is present, or redirected to login, we are NOT authenticated
+        if (
+          $('#postloginform').length > 0 ||
+          $('#j_scriptusername').length > 0 ||
+          res.data.includes('j_spring_security_check') ||
+          res.data.includes('Sign in')
+        ) {
+          return false;
+        }
+
         const token = $('meta[name="csrf-token"]').attr('content');
         if (token) {
           this.csrfToken = token;
           return true;
-        }
-        // If login form is present, auth failed
-        if ($('#postloginform').length > 0 || res.data.includes('j_spring_security_check')) {
-          return false;
         }
       }
       return false;
@@ -379,7 +390,7 @@ export class PesuClient {
     });
 
     return {
-      semester: sems.find((s) => s.id === targetSemId)?.name || targetSemId,
+      semester: sems.find((s) => s.id === targetSemId)?.name || targetSemId || 'Current',
       sgpa,
       cgpa,
       earnedCredits,
@@ -484,6 +495,7 @@ export class PesuClient {
     attachmentId: string,
     outputDir: string = './downloads'
   ): Promise<{ filename: string; path: string; size: number }> {
+    if (!attachmentId) throw new Error('Attachment ID is required.');
     await this.ensureAuthenticated();
     const targetDir = resolveOutputDir(outputDir);
     fs.mkdirSync(targetDir, { recursive: true });
@@ -515,6 +527,7 @@ export class PesuClient {
   }
 
   public async readAnnouncementAttachmentText(attachmentId: string): Promise<string> {
+    if (!attachmentId) throw new Error('Attachment ID is required.');
     await this.ensureAuthenticated();
     const url = `/Academy/s/studentProfilePESUAdmin/downloadAnoncemntdoc/${attachmentId}`;
     const res = await this.client.get(url, {
@@ -525,10 +538,16 @@ export class PesuClient {
       },
     });
 
-    const buffer = Buffer.from(res.data);
-    const pdf = ((await import('pdf-parse')) as any).default || (await import('pdf-parse'));
-    const parsed = await pdf(buffer);
-    return parsed.text;
+    const pdfModule = (await import('pdf-parse')) as any;
+    if (pdfModule.PDFParse) {
+      const parser = new pdfModule.PDFParse(new Uint8Array(res.data));
+      const result = await parser.getText();
+      return typeof result === 'string' ? result : (result.text || '');
+    } else {
+      const pdfFn = pdfModule.default || pdfModule;
+      const parsed = await pdfFn(Buffer.from(res.data));
+      return parsed.text || '';
+    }
   }
 
   // --- 4. Time Table ---
@@ -548,12 +567,21 @@ export class PesuClient {
     const ttJsonMatch = script.match(/var\s+timeTableJson\s*=\s*(\[[^\]]*\]|{[^}]*});/);
     const templateMatch = script.match(/var\s+timeTableTemplateDetailsJson\s*=\s*(\[[^\]]*\]|{[^}]*});/);
 
+    const safeParse = (str: string | null) => {
+      if (!str) return null;
+      try {
+        return JSON.parse(str);
+      } catch {
+        return null;
+      }
+    };
+
     return {
       className: batchMatch ? batchMatch[1] : 'Unknown',
       section: sectionMatch ? sectionMatch[1] : 'Unknown',
       tableRaw: script.includes('handleTimeTable') ? 'Available in template' : 'Empty schedule',
-      timetableJson: ttJsonMatch ? JSON.parse(ttJsonMatch[1]) : null,
-      templateJson: templateMatch ? JSON.parse(templateMatch[1]) : null,
+      timetableJson: safeParse(ttJsonMatch ? ttJsonMatch[1] : null),
+      templateJson: safeParse(templateMatch ? templateMatch[1] : null),
     };
   }
 
@@ -616,6 +644,7 @@ export class PesuClient {
       unitContentId: string;
     }>;
   }> {
+    if (!courseContentId) throw new Error('Course content ID is required.');
     const html = await this.doAjax('studentProfilePESUAdmin', 'GET', {
       controllerMode: 6403,
       actionType: 42,
@@ -654,6 +683,7 @@ export class PesuClient {
       courseContentId: string;
     }>
   > {
+    if (!unitContentId) throw new Error('Unit content ID is required.');
     const html = await this.doAjax('studentProfilePESUAdmin', 'GET', {
       controllerMode: 6403,
       actionType: 43,
@@ -771,6 +801,7 @@ export class PesuClient {
     customFilename?: string,
     outputDir: string = './downloads'
   ): Promise<{ filename: string; path: string; size: number }> {
+    if (!docId) throw new Error('Document ID is required.');
     await this.ensureAuthenticated();
     const targetDir = resolveOutputDir(outputDir);
     fs.mkdirSync(targetDir, { recursive: true });
@@ -812,6 +843,8 @@ export class PesuClient {
     downloadedFiles: Array<{ title: string; path: string; size: number }>;
     message: string;
   }> {
+    if (!courseQuery) throw new Error('Course query is required.');
+    if (!unitQuery) throw new Error('Unit query is required.');
     const sems = await this.getSemesters();
     let courses: any[] = [];
 
@@ -993,7 +1026,8 @@ export class PesuClient {
 
     // Parse calendar event rows
     const text = $.text().replace(/\s+/g, ' ');
-    const eventRegex = /([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+([A-Za-z]+)\s+all-day\s+([^A-Z\n]+(?:\s+[\w\d]+)*)/g;
+    const eventRegex =
+      /([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+([A-Za-z]+)\s+all-day\s+([^\n]+?)(?=(?:[A-Za-z]+\s+\d{1,2},\s+\d{4})|$)/g;
     let match;
     while ((match = eventRegex.exec(text)) !== null) {
       events.push({
@@ -1120,53 +1154,6 @@ export class PesuClient {
       path: filePath,
       size: res.data.byteLength,
     };
-  }
-
-  // --- 15. Home & Portal Credentials (Teams, WiFi, MATLAB) ---
-  public async getPortalCredentials(): Promise<
-    Array<{ service: string; username: string; password?: string }>
-  > {
-    const html = await this.doAjax('studentProfilePESUAdmin', 'GET', {
-      controllerMode: 6401,
-      actionType: 5,
-      menuId: 651,
-    });
-
-    const $ = cheerio.load(html);
-    const text = $.text().replace(/\s+/g, ' ');
-    const credentials: Array<{ service: string; username: string; password?: string }> = [];
-
-    // Teams
-    const teamsMatch = text.match(/Teams Credentials:\s*Username\s*:\s*([^\s]+)\s*Password:\s*([^\s]+)/i);
-    if (teamsMatch) {
-      credentials.push({
-        service: 'Microsoft Teams',
-        username: teamsMatch[1],
-        password: teamsMatch[2],
-      });
-    }
-
-    // Captive Portal
-    const wifiMatch = text.match(/Username\s*:\s*([^\s]+)\s*\(For Internet Captive Portal\)\s*Password:\s*([^\s]+)/i);
-    if (wifiMatch) {
-      credentials.push({
-        service: 'Campus WiFi (Captive Portal)',
-        username: wifiMatch[1],
-        password: wifiMatch[2],
-      });
-    }
-
-    // MATLAB
-    const matlabMatch = text.match(/Username\s*:\s*([^\s]+)\s*\(For MATLAB\)\s*Password:\s*([^\s]+)/i);
-    if (matlabMatch) {
-      credentials.push({
-        service: 'MATLAB License',
-        username: matlabMatch[1],
-        password: matlabMatch[2],
-      });
-    }
-
-    return credentials;
   }
 
   // --- 17. Grievance Redressal ---

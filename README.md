@@ -1,5 +1,7 @@
 # PESU Academy MCP Server 🎓
 
+> ⚠️ **Disclaimer / Proof of Concept**: This is an independent open-source project and proof of concept. It is not affiliated with, endorsed by, or sponsored by PES University. Use responsibly and at your own discretion.
+
 A Model Context Protocol (MCP) server for **PESU Academy** (`pesuacademy.com`).
 
 Allows AI assistants (like Claude, Antigravity, Cursor, etc.) to securely query student attendance, view results, timetable, download course lecture slides & unit notes, check and download hall tickets, fetch announcements and PDF circulars, and more.
@@ -36,7 +38,6 @@ Allows AI assistants (like Claude, Antigravity, Cursor, etc.) to securely query 
 * **`pesu_get_assignments`**: Checks homework deadlines, submission status, and evaluation marks.
 
 ### 5. Administrative & Campus Utility
-* **`pesu_get_portal_credentials`**: Retrieves student Microsoft Teams logins, WiFi Captive Portal credentials, and MATLAB licenses.
 * **`pesu_get_calendar`**: Lists university calendar events, exam dates, and holidays.
 * **`pesu_get_grievances`**: Lists student grievance redressal tickets.
 * **`pesu_check_backlog_status`**: Checks whether backlog registration is open.
@@ -53,7 +54,8 @@ PESU_SESSION_ID=your_session_id_here
 
 # Option B: Login Credentials (Auto-login)
 PESU_USERNAME=PES1202XXXXXX
-PESU_PASSWORD=your_password
+# Note: Wrap in quotes if your password contains special characters like #, $, etc.
+PESU_PASSWORD="your_password#"
 ```
 
 ---
@@ -113,6 +115,9 @@ In your MCP config file (e.g. `%APPDATA%\Claude\claude_desktop_config.json` or A
 ```bash
 # Install dependencies
 npm install
+
+# Run automated test suite (83 unit & integration tests)
+npm test
 
 # Build TypeScript
 npm run build
